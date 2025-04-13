@@ -15,10 +15,11 @@ import (
 )
 
 const (
-	SUBREDDIT             = "hackernews"
 	REDDIT_TIMEOUT        = 30
-	REDDIT_AGENT          = "hakernews:hnmod:0.1.0"
+	REDDIT_SUBREDDIT      = "hackernews"
+	REDDIT_AGENT          = "hackernews:hnmod:0.1.0"
 	REDDIT_USERNAME       = "hnmod"
+	REDDIT_MAX_POSTS      = "100"
 	REDDIT_ID             = "v7eIyAVMwtcKG00ahocIXg"
 	HN_BASE_URL           = "news.ycombinator.com"
 	RSS_PROTOCOL          = "https"
@@ -159,11 +160,11 @@ func processFeed(bot reddit.Bot, feed *gofeed.Feed) error {
 		}
 
 		if _, exists := existingLinks[item.Link]; exists {
-			fmt.Printf("Post already exists (from cache), skipping: %s\n", item.Title)
+			fmt.Printf("Post already exists, skipping: %s\n", item.Link)
 			continue
 		}
 
-		err := postNew(bot, item)
+		err := postNew(bot, item, existingLinks)
 		if err != nil {
 			errorCount++
 			fmt.Printf("Error posting item %d (%s): %v\n", i, item.Title, err)
@@ -184,15 +185,11 @@ func getExistingPosts(bot reddit.Bot) (map[string]bool, error) {
 		return nil, errors.New("bot is nil")
 	}
 
-	if SUBREDDIT == "" {
-		return nil, errors.New("SUBREDDIT constant is empty")
-	}
-
 	fmt.Println("Getting existing posts from subreddit")
-	postUrl := fmt.Sprintf("/r/%s/new", SUBREDDIT)
+	postUrl := fmt.Sprintf("/r/%s/new", REDDIT_SUBREDDIT)
 
 	postOpts := map[string]string{
-		"limit": "100",
+		"limit": REDDIT_MAX_POSTS,
 	}
 
 	posts, err := bot.ListingWithParams(postUrl, postOpts)
@@ -206,16 +203,21 @@ func getExistingPosts(bot reddit.Bot) (map[string]bool, error) {
 
 	existingLinks := make(map[string]bool)
 	for _, post := range posts.Posts {
-		if post.URL != "" {
+		if post.URL != "" && !post.Deleted {
 			existingLinks[post.URL] = true
 		}
+	}
+
+	if len(existingLinks) == 0 {
+		fmt.Println("No existing posts found")
+		return nil, errors.New("no existing posts found")
 	}
 
 	fmt.Printf("Found %d existing posts\n", len(existingLinks))
 	return existingLinks, nil
 }
 
-func postNew(bot reddit.Bot, item *gofeed.Item) error {
+func postNew(bot reddit.Bot, item *gofeed.Item, existingLinks map[string]bool) error {
 	if bot == nil {
 		return errors.New("bot is nil")
 	}
@@ -240,17 +242,12 @@ func postNew(bot reddit.Bot, item *gofeed.Item) error {
 	}
 	fmt.Println("HN link:", isHn)
 
-	exists, err := checkPostExists(bot, item.Link)
-	if err != nil {
-		return fmt.Errorf("error checking if post exists: %w", err)
-	}
-
-	if exists {
-		fmt.Println("Post already exists, skipping:", item.Title)
+	if exists := existingLinks[item.Link]; exists {
+		fmt.Println("Post already exists, skipping:", item.Link)
 		return nil
 	}
 
-	submission, err := bot.GetPostLink(SUBREDDIT, item.Title, item.Link)
+	submission, err := bot.GetPostLink(REDDIT_SUBREDDIT, item.Title, item.Link)
 	if err != nil {
 		return fmt.Errorf("failed to create Reddit post: %w", err)
 	}
@@ -285,40 +282,6 @@ func postNew(bot reddit.Bot, item *gofeed.Item) error {
 	return nil
 }
 
-func checkPostExists(bot reddit.Bot, link string) (bool, error) {
-	if bot == nil {
-		return false, errors.New("bot is nil")
-	}
-
-	if link == "" {
-		return false, errors.New("link is empty")
-	}
-
-	fmt.Println("Checking if post exists")
-	postUrl := fmt.Sprintf("/r/%s/new", SUBREDDIT)
-
-	postOpts := map[string]string{
-		"limit": "100",
-	}
-
-	posts, err := bot.ListingWithParams(postUrl, postOpts)
-	if err != nil {
-		return false, fmt.Errorf("failed to get Reddit listings: %w", err)
-	}
-
-	if posts.Posts == nil {
-		return false, errors.New("posts.Posts is nil")
-	}
-
-	for _, post := range posts.Posts {
-		if post.URL == link {
-			return true, nil
-		}
-	}
-
-	return false, nil
-}
-
 func newBot() (reddit.Bot, error) {
 	fmt.Println("Getting Reddit bot")
 
@@ -332,6 +295,27 @@ func newBot() (reddit.Bot, error) {
 		return nil, errors.New("no Reddit password provided in environment variable REDDIT_PASSWORD")
 	}
 
+	transport := &http.Transport{
+		MaxIdleConns:          10,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
+		DisableCompression:    false,
+		DisableKeepAlives:     false,
+	}
+
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   time.Second * REDDIT_TIMEOUT,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("too many redirects")
+			}
+			return nil
+		},
+	}
+
 	cfg := reddit.BotConfig{
 		Agent: REDDIT_AGENT,
 		App: reddit.App{
@@ -341,11 +325,18 @@ func newBot() (reddit.Bot, error) {
 			Password: password,
 		},
 		Rate:   1 * time.Second,
-		Client: &http.Client{Timeout: time.Second * REDDIT_TIMEOUT},
+		Client: client,
 	}
 
 	bot, err := reddit.NewBot(cfg)
 	if err != nil {
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			if urlErr.Timeout() {
+				return nil, fmt.Errorf("Reddit API connection timed out: %w", err)
+			}
+			return nil, fmt.Errorf("Reddit API connection error: %w", err)
+		}
 		return nil, fmt.Errorf("failed to create Reddit bot: %w", err)
 	}
 

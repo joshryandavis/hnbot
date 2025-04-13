@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -14,13 +15,18 @@ import (
 )
 
 const (
-	TIMEOUT         = 30
-	HN_BASE_URL     = "news.ycombinator.com"
-	SUBREDDIT       = "hackernews"
-	REDDIT_AGENT    = "hakernews:hnmod:0.1.0"
-	REDDIT_USERNAME = "hnmod"
-	REDDIT_ID       = "v7eIyAVMwtcKG00ahocIXg"
-	RSS_URL         = "https://hnrss.org/frontpage"
+	SUBREDDIT             = "hackernews"
+	REDDIT_TIMEOUT        = 30
+	REDDIT_AGENT          = "hakernews:hnmod:0.1.0"
+	REDDIT_USERNAME       = "hnmod"
+	REDDIT_ID             = "v7eIyAVMwtcKG00ahocIXg"
+	HN_BASE_URL           = "news.ycombinator.com"
+	RSS_PROTOCOL          = "https"
+	RSS_BASE_URL          = "hnrss.org"
+	RSS_FEED              = "frontpage"
+	RSS_COUNT             = 30
+	HN_POINTS_THRESHOLD   = 30
+	HN_COMMENTS_THRESHOLD = 1
 )
 
 func main() {
@@ -60,15 +66,19 @@ func main() {
 func getFeed() (*gofeed.Feed, error) {
 	fmt.Println("Getting feed")
 
+	rssURL := buildFeedUrl()
+
+	fmt.Println("RSS URL:", rssURL.String())
+
 	fp := gofeed.NewParser()
 	if fp == nil {
 		return nil, errors.New("failed to create feed parser")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*TIMEOUT)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*REDDIT_TIMEOUT)
 	defer cancel()
 
-	feed, err := fp.ParseURLWithContext(RSS_URL, ctx)
+	feed, err := fp.ParseURLWithContext(rssURL.String(), ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse feed URL: %w", err)
 	}
@@ -95,6 +105,21 @@ func getFeed() (*gofeed.Feed, error) {
 	}
 
 	return feed, nil
+}
+
+func buildFeedUrl() *url.URL {
+	rssURL := &url.URL{
+		Scheme: RSS_PROTOCOL,
+		Host:   RSS_BASE_URL,
+		Path:   RSS_FEED,
+	}
+
+	query := rssURL.Query()
+	query.Set("count", fmt.Sprintf("%d", RSS_COUNT))
+	query.Set("points", fmt.Sprintf("%d", HN_POINTS_THRESHOLD))
+	query.Set("comments", fmt.Sprintf("%d", HN_COMMENTS_THRESHOLD))
+	rssURL.RawQuery = query.Encode()
+	return rssURL
 }
 
 func processFeed(bot reddit.Bot, feed *gofeed.Feed) error {
@@ -314,7 +339,7 @@ func newBot() (reddit.Bot, error) {
 			Password: password,
 		},
 		Rate:   1 * time.Second,
-		Client: &http.Client{Timeout: time.Second * TIMEOUT},
+		Client: &http.Client{Timeout: time.Second * REDDIT_TIMEOUT},
 	}
 
 	bot, err := reddit.NewBot(cfg)

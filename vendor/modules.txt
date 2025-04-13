@@ -7,8 +7,6 @@ github.com/andybalholm/cascadia
 # github.com/golang/protobuf v1.3.2
 ## explicit
 github.com/golang/protobuf/proto
-# github.com/google/go-querystring v1.0.0
-## explicit
 # github.com/json-iterator/go v1.1.12
 ## explicit; go 1.12
 github.com/json-iterator/go
@@ -38,10 +36,8 @@ github.com/turnage/graw/reddit
 # github.com/turnage/redditproto v0.0.0-20151223012412-afedf1b6eddb
 ## explicit
 github.com/turnage/redditproto
-# github.com/vartanbeno/go-reddit/v2 v2.0.1
-## explicit; go 1.15
-# golang.org/x/net v0.7.0
-## explicit; go 1.17
+# golang.org/x/net v0.36.0
+## explicit; go 1.23.0
 golang.org/x/net/context
 golang.org/x/net/context/ctxhttp
 golang.org/x/net/html
@@ -52,8 +48,8 @@ golang.org/x/net/html/charset
 golang.org/x/oauth2
 golang.org/x/oauth2/clientcredentials
 golang.org/x/oauth2/internal
-# golang.org/x/text v0.7.0
-## explicit; go 1.17
+# golang.org/x/text v0.22.0
+## explicit; go 1.18
 golang.org/x/text/encoding
 golang.org/x/text/encoding/charmap
 golang.org/x/text/encoding/htmlindex

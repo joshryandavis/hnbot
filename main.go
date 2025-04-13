@@ -26,8 +26,8 @@ const (
 	RSS_BASE_URL          = "hnrss.org"
 	RSS_FEED              = "frontpage"
 	RSS_COUNT             = 30
-	HN_POINTS_THRESHOLD   = 30
-	HN_COMMENTS_THRESHOLD = 0
+	HN_POINTS_THRESHOLD   = 200
+	HN_COMMENTS_THRESHOLD = 30
 )
 
 func main() {

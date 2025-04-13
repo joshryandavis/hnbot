@@ -26,7 +26,7 @@ const (
 	RSS_FEED              = "frontpage"
 	RSS_COUNT             = 30
 	HN_POINTS_THRESHOLD   = 30
-	HN_COMMENTS_THRESHOLD = 1
+	HN_COMMENTS_THRESHOLD = 0
 )
 
 func main() {

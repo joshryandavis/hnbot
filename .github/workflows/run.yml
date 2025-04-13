@@ -1,7 +1,7 @@
 on:
+  workflow_dispatch:
   schedule:
     - cron: "*/5 * * * *" # Run every 5 minutes
-  workflow_dispatch: # Allow manual triggering
 
 jobs:
   build:
@@ -16,4 +16,4 @@ jobs:
         env:
           REDDIT_SECRET: ${{ secrets.REDDIT_SECRET }}
           REDDIT_PASSWORD: ${{ secrets.REDDIT_PASSWORD }}
-        run: go run . 20
+        run: go run .

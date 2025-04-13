@@ -109,6 +109,12 @@ func processFeed(bot reddit.Bot, feed *gofeed.Feed) error {
 	processedCount := 0
 	errorCount := 0
 
+	// Get existing posts first to avoid duplicates
+	existingLinks, err := getExistingPosts(bot)
+	if err != nil {
+		return fmt.Errorf("error getting existing posts: %w", err)
+	}
+
 	for i, item := range feed.Items {
 		if item == nil {
 			fmt.Printf("Warning: skipping nil item at index %d\n", i)
@@ -124,6 +130,13 @@ func processFeed(bot reddit.Bot, feed *gofeed.Feed) error {
 			fmt.Printf("Warning: skipping item with empty link: %s\n", item.Title)
 			continue
 		}
+
+		// Check if link already exists in our cached list
+		if _, exists := existingLinks[item.Link]; exists {
+			fmt.Printf("Post already exists (from cache), skipping: %s\n", item.Title)
+			continue
+		}
+
 		err := postNew(bot, item)
 		if err != nil {
 			errorCount++
@@ -138,6 +151,42 @@ func processFeed(bot reddit.Bot, feed *gofeed.Feed) error {
 
 	fmt.Printf("Successfully processed %d items\n", processedCount)
 	return nil
+}
+
+func getExistingPosts(bot reddit.Bot) (map[string]bool, error) {
+	if bot == nil {
+		return nil, errors.New("bot is nil")
+	}
+
+	if SUBREDDIT == "" {
+		return nil, errors.New("SUBREDDIT constant is empty")
+	}
+
+	fmt.Println("Getting existing posts from subreddit")
+	postUrl := fmt.Sprintf("/r/%s/new", SUBREDDIT)
+
+	postOpts := map[string]string{
+		"limit": "100",
+	}
+
+	posts, err := bot.ListingWithParams(postUrl, postOpts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Reddit listings: %w", err)
+	}
+
+	if posts.Posts == nil {
+		return nil, errors.New("posts.Posts is nil")
+	}
+
+	existingLinks := make(map[string]bool)
+	for _, post := range posts.Posts {
+		if post.URL != "" {
+			existingLinks[post.URL] = true
+		}
+	}
+
+	fmt.Printf("Found %d existing posts\n", len(existingLinks))
+	return existingLinks, nil
 }
 
 func postNew(bot reddit.Bot, item *gofeed.Item) error {

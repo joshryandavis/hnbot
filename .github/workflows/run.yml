@@ -16,4 +16,4 @@ jobs:
         env:
           REDDIT_SECRET: ${{ secrets.REDDIT_SECRET }}
           REDDIT_PASSWORD: ${{ secrets.REDDIT_PASSWORD }}
-        run: go run . 10
+        run: go run . 20

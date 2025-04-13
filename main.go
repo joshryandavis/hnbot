@@ -17,6 +17,7 @@ const (
 	TIMEOUT         = 30
 	HN_BASE_URL     = "news.ycombinator.com"
 	SUBREDDIT       = "hackernews"
+	REDDIT_AGENT    = "hakernews:hnmod:0.1.0"
 	REDDIT_USERNAME = "hnmod"
 	REDDIT_ID       = "v7eIyAVMwtcKG00ahocIXg"
 	RSS_URL         = "https://hnrss.org/frontpage"
@@ -109,7 +110,6 @@ func processFeed(bot reddit.Bot, feed *gofeed.Feed) error {
 	processedCount := 0
 	errorCount := 0
 
-	// Get existing posts first to avoid duplicates
 	existingLinks, err := getExistingPosts(bot)
 	if err != nil {
 		return fmt.Errorf("error getting existing posts: %w", err)
@@ -131,7 +131,6 @@ func processFeed(bot reddit.Bot, feed *gofeed.Feed) error {
 			continue
 		}
 
-		// Check if link already exists in our cached list
 		if _, exists := existingLinks[item.Link]; exists {
 			fmt.Printf("Post already exists (from cache), skipping: %s\n", item.Title)
 			continue
@@ -224,10 +223,6 @@ func postNew(bot reddit.Bot, item *gofeed.Item) error {
 		return nil
 	}
 
-	if SUBREDDIT == "" {
-		return errors.New("SUBREDDIT constant is empty")
-	}
-
 	submission, err := bot.GetPostLink(SUBREDDIT, item.Title, item.Link)
 	if err != nil {
 		return fmt.Errorf("failed to create Reddit post: %w", err)
@@ -272,10 +267,6 @@ func checkPostExists(bot reddit.Bot, link string) (bool, error) {
 		return false, errors.New("link is empty")
 	}
 
-	if SUBREDDIT == "" {
-		return false, errors.New("SUBREDDIT constant is empty")
-	}
-
 	fmt.Println("Checking if post exists")
 	postUrl := fmt.Sprintf("/r/%s/new", SUBREDDIT)
 
@@ -315,7 +306,7 @@ func newBot() (reddit.Bot, error) {
 	}
 
 	cfg := reddit.BotConfig{
-		Agent: "hakernews:hnmod:0.1.0",
+		Agent: REDDIT_AGENT,
 		App: reddit.App{
 			ID:       REDDIT_ID,
 			Username: REDDIT_USERNAME,

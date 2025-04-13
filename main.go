@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -21,29 +20,10 @@ const (
 	REDDIT_USERNAME = "hnmod"
 	REDDIT_ID       = "v7eIyAVMwtcKG00ahocIXg"
 	RSS_URL         = "https://hnrss.org/frontpage"
-	MAX_TIME_WINDOW = 24 * 60
-	MIN_TIME_WINDOW = 1
 )
 
 func main() {
 	fmt.Println("Starting")
-
-	if len(os.Args) < 2 {
-		fmt.Println("Error: missing time window argument")
-		fmt.Println("Usage: program <minutes>")
-		return
-	}
-
-	timeWindow, err := getTimeWindow()
-	if err != nil {
-		fmt.Println("Error getting time window:", err)
-		return
-	}
-
-	if timeWindow == 0 {
-		fmt.Println("Error: time window cannot be zero")
-		return
-	}
 
 	bot, err := newBot()
 	if err != nil {
@@ -67,42 +47,13 @@ func main() {
 		return
 	}
 
-	err = processFeed(bot, feed, timeWindow)
+	err = processFeed(bot, feed)
 	if err != nil {
 		fmt.Println("Error processing:", err)
 		return
 	}
 
 	fmt.Println("Done")
-}
-
-func getTimeWindow() (time.Duration, error) {
-	fmt.Println("Getting time window")
-	args := os.Args[1:]
-	if len(args) != 1 {
-		return 0, errors.New("invalid arguments: expected exactly one argument")
-	}
-
-	if args[0] == "" {
-		return 0, errors.New("invalid argument: time window cannot be empty")
-	}
-
-	minutesInt, err := strconv.Atoi(args[0])
-	if err != nil {
-		return 0, fmt.Errorf("invalid time format - must be an integer: %v", err)
-	}
-
-	if minutesInt < MIN_TIME_WINDOW {
-		return 0, fmt.Errorf("invalid time window: must be at least %d minute(s)", MIN_TIME_WINDOW)
-	}
-
-	if minutesInt > MAX_TIME_WINDOW {
-		return 0, fmt.Errorf("invalid time window: must be at most %d minutes", MAX_TIME_WINDOW)
-	}
-
-	timeWindow := time.Duration(minutesInt) * time.Minute
-	fmt.Println("Time window:", timeWindow)
-	return timeWindow, nil
 }
 
 func getFeed() (*gofeed.Feed, error) {
@@ -145,7 +96,7 @@ func getFeed() (*gofeed.Feed, error) {
 	return feed, nil
 }
 
-func processFeed(bot reddit.Bot, feed *gofeed.Feed, timeWindow time.Duration) error {
+func processFeed(bot reddit.Bot, feed *gofeed.Feed) error {
 	if bot == nil {
 		return errors.New("bot is nil")
 	}
@@ -154,15 +105,9 @@ func processFeed(bot reddit.Bot, feed *gofeed.Feed, timeWindow time.Duration) er
 		return errors.New("feed is nil")
 	}
 
-	if timeWindow <= 0 {
-		return errors.New("timeWindow must be positive")
-	}
-
 	fmt.Println("Processing feed")
 	processedCount := 0
 	errorCount := 0
-
-	cutoffTime := time.Now().UTC().Add(-timeWindow)
 
 	for i, item := range feed.Items {
 		if item == nil {
@@ -179,21 +124,16 @@ func processFeed(bot reddit.Bot, feed *gofeed.Feed, timeWindow time.Duration) er
 			fmt.Printf("Warning: skipping item with empty link: %s\n", item.Title)
 			continue
 		}
-
-		if item.PublishedParsed.UTC().After(cutoffTime) {
-			err := postNew(bot, item)
-			if err != nil {
-				errorCount++
-				fmt.Printf("Error posting item %d (%s): %v\n", i, item.Title, err)
-				if errorCount >= 3 {
-					return fmt.Errorf("too many posting errors (%d): aborting", errorCount)
-				}
-				continue
+		err := postNew(bot, item)
+		if err != nil {
+			errorCount++
+			fmt.Printf("Error posting item %d (%s): %v\n", i, item.Title, err)
+			if errorCount >= 3 {
+				return fmt.Errorf("too many posting errors (%d): aborting", errorCount)
 			}
-			processedCount++
-		} else {
-			fmt.Println("Skipping outdated item:", item.Title)
+			continue
 		}
+		processedCount++
 	}
 
 	fmt.Printf("Successfully processed %d items\n", processedCount)

@@ -63,6 +63,23 @@ func main() {
 	fmt.Println("Done")
 }
 
+func buildFeedUrl() *url.URL {
+	rssURL := &url.URL{
+		Scheme: RSS_PROTOCOL,
+		Host:   RSS_BASE_URL,
+		Path:   RSS_FEED,
+	}
+
+	query := rssURL.Query()
+	query.Set("count", fmt.Sprintf("%d", RSS_COUNT))
+	query.Set("points", fmt.Sprintf("%d", HN_POINTS_THRESHOLD))
+	query.Set("comments", fmt.Sprintf("%d", HN_COMMENTS_THRESHOLD))
+
+	rssURL.RawQuery = query.Encode()
+
+	return rssURL
+}
+
 func getFeed() (*gofeed.Feed, error) {
 	fmt.Println("Getting feed")
 
@@ -105,21 +122,6 @@ func getFeed() (*gofeed.Feed, error) {
 	}
 
 	return feed, nil
-}
-
-func buildFeedUrl() *url.URL {
-	rssURL := &url.URL{
-		Scheme: RSS_PROTOCOL,
-		Host:   RSS_BASE_URL,
-		Path:   RSS_FEED,
-	}
-
-	query := rssURL.Query()
-	query.Set("count", fmt.Sprintf("%d", RSS_COUNT))
-	query.Set("points", fmt.Sprintf("%d", HN_POINTS_THRESHOLD))
-	query.Set("comments", fmt.Sprintf("%d", HN_COMMENTS_THRESHOLD))
-	rssURL.RawQuery = query.Encode()
-	return rssURL
 }
 
 func processFeed(bot reddit.Bot, feed *gofeed.Feed) error {

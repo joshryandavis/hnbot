@@ -25,9 +25,9 @@ const (
 	RSS_PROTOCOL          = "https"
 	RSS_BASE_URL          = "hnrss.org"
 	RSS_FEED              = "frontpage"
-	RSS_COUNT             = 30
-	HN_POINTS_THRESHOLD   = 200
-	HN_COMMENTS_THRESHOLD = 30
+	RSS_COUNT             = 50
+	HN_POINTS_THRESHOLD   = 100
+	HN_COMMENTS_THRESHOLD = 10
 )
 
 func main() {

@@ -273,7 +273,7 @@ func newBot() (reddit.Bot, error) {
 			Secret:   secret,
 			Password: password,
 		},
-		Rate:   5 * time.Second,
+		Rate:   1 * time.Second,
 		Client: &http.Client{Timeout: time.Second * TIMEOUT},
 	}
 

@@ -36,7 +36,7 @@ github.com/turnage/graw/reddit
 # github.com/turnage/redditproto v0.0.0-20151223012412-afedf1b6eddb
 ## explicit
 github.com/turnage/redditproto
-# golang.org/x/net v0.36.0
+# golang.org/x/net v0.38.0
 ## explicit; go 1.23.0
 golang.org/x/net/context
 golang.org/x/net/context/ctxhttp
@@ -48,8 +48,8 @@ golang.org/x/net/html/charset
 golang.org/x/oauth2
 golang.org/x/oauth2/clientcredentials
 golang.org/x/oauth2/internal
-# golang.org/x/text v0.22.0
-## explicit; go 1.18
+# golang.org/x/text v0.23.0
+## explicit; go 1.23.0
 golang.org/x/text/encoding
 golang.org/x/text/encoding/charmap
 golang.org/x/text/encoding/htmlindex

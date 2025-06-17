@@ -1,9 +1,15 @@
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/15 * * * *" # Run every 15 minutes
-
+    - cron: "*/15 * * * *"
 jobs:
+  workflow-keepalive:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - uses: liskin/gh-workflow-keepalive@v1
+
   build:
     runs-on: ubuntu-latest
     concurrency:
@@ -11,12 +17,10 @@ jobs:
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Go
-        uses: actions/setup-go@v4
+      - uses: actions/setup-go@v4
         with:
           go-version: "1.24.1"
-      - name: Run HN Bot
-        env:
+      - env:
           REDDIT_SECRET: ${{ secrets.REDDIT_SECRET }}
           REDDIT_PASSWORD: ${{ secrets.REDDIT_PASSWORD }}
         run: go run .

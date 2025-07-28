@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -159,7 +160,12 @@ func processFeed(bot reddit.Bot, feed *gofeed.Feed) error {
 			continue
 		}
 
-		if _, exists := existingLinks[item.Link]; exists {
+		linkKey := item.Link
+		if strings.Contains(item.Link, "reddit.com") || strings.Contains(item.Link, "redd.it") {
+			linkKey = normalizeRedditURL(item.Link)
+		}
+
+		if _, exists := existingLinks[linkKey]; exists {
 			fmt.Printf("Post already exists, skipping: %s\n", item.Link)
 			continue
 		}
@@ -178,6 +184,32 @@ func processFeed(bot reddit.Bot, feed *gofeed.Feed) error {
 
 	fmt.Printf("Successfully processed %d items\n", processedCount)
 	return nil
+}
+
+func normalizeRedditURL(rawURL string) string {
+	if rawURL == "" {
+		return rawURL
+	}
+
+	// Remove query parameters and clean up URL
+	cleanURL := rawURL
+	if idx := strings.Index(cleanURL, "?"); idx != -1 {
+		cleanURL = cleanURL[:idx]
+	}
+
+	// Extract Reddit post ID from various URL formats
+	// Pattern matches: reddit.com/r/sub/comments/ID, redd.it/ID, reddit.com/r/sub/s/ID
+	redditIDRegex := regexp.MustCompile(`(?:reddit\.com/r/[^/]+/comments/|redd\.it/)([a-zA-Z0-9]+)`)
+	if matches := redditIDRegex.FindStringSubmatch(cleanURL); len(matches) > 1 {
+		return matches[1]
+	}
+
+	// For shared links (s/XXXXX), we can't resolve without fetching, so use full URL
+	if strings.Contains(cleanURL, "/s/") {
+		return cleanURL
+	}
+
+	return rawURL
 }
 
 func getExistingPosts(bot reddit.Bot) (map[string]bool, error) {
@@ -204,7 +236,12 @@ func getExistingPosts(bot reddit.Bot) (map[string]bool, error) {
 	existingLinks := make(map[string]bool)
 	for _, post := range posts.Posts {
 		if post.URL != "" && !post.Deleted {
-			existingLinks[post.URL] = true
+			if strings.Contains(post.URL, "reddit.com") || strings.Contains(post.URL, "redd.it") {
+				normalizedID := normalizeRedditURL(post.URL)
+				existingLinks[normalizedID] = true
+			} else {
+				existingLinks[post.URL] = true
+			}
 		}
 	}
 
@@ -242,7 +279,12 @@ func postNew(bot reddit.Bot, item *gofeed.Item, existingLinks map[string]bool) e
 	}
 	fmt.Println("HN link:", isHn)
 
-	if exists := existingLinks[item.Link]; exists {
+	linkKey := item.Link
+	if strings.Contains(item.Link, "reddit.com") || strings.Contains(item.Link, "redd.it") {
+		linkKey = normalizeRedditURL(item.Link)
+	}
+
+	if exists := existingLinks[linkKey]; exists {
 		fmt.Println("Post already exists, skipping:", item.Link)
 		return nil
 	}

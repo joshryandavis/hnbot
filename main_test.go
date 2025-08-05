@@ -109,6 +109,21 @@ func TestNormalizeURL(t *testing.T) {
 			expected: "https://thingino.com/",
 		},
 		{
+			name:     "URL with percent-encoded character",
+			input:    "https://openipc.org/%C3%A0",
+			expected: "https://openipc.org/%C3%A0",
+		},
+		{
+			name:     "URL with decoded special character",
+			input:    "https://openipc.org/à",
+			expected: "https://openipc.org/%C3%A0",
+		},
+		{
+			name:     "Same URL with www and percent encoding",
+			input:    "https://www.openipc.org/%C3%A0",
+			expected: "https://openipc.org/%C3%A0",
+		},
+		{
 			name:     "Reddit URL uses Reddit normalization",
 			input:    "https://www.reddit.com/r/test/comments/123abc/title/",
 			expected: "123abc",

@@ -62,12 +62,20 @@ func normalizeURL(rawURL string) string {
 		parsedURL.Host = strings.TrimPrefix(parsedURL.Host, "www.")
 	}
 
+	// Decode and re-encode the path to normalize percent-encoding
+	if decodedPath, err := url.QueryUnescape(parsedURL.Path); err == nil {
+		parsedURL.Path = decodedPath
+	}
+
 	parsedURL.Path = strings.TrimSuffix(parsedURL.Path, "/")
 	if parsedURL.Path == "" {
 		parsedURL.Path = "/"
 	}
 
 	parsedURL.Fragment = ""
+	
+	// Re-encode the URL to ensure consistent encoding
+	parsedURL.RawPath = ""  // Let Go re-encode the path
 
 	return parsedURL.String()
 }

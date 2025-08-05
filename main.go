@@ -20,7 +20,6 @@ const (
 	REDDIT_SUBREDDIT      = "hackernews"
 	REDDIT_AGENT          = "hackernews:hnmod:0.1.0"
 	REDDIT_USERNAME       = "hnmod"
-	REDDIT_MAX_POSTS      = "100"
 	REDDIT_ID             = "v7eIyAVMwtcKG00ahocIXg"
 	HN_BASE_URL           = "news.ycombinator.com"
 	RSS_PROTOCOL          = "https"
@@ -29,7 +28,49 @@ const (
 	RSS_COUNT             = 50
 	HN_POINTS_THRESHOLD   = 100
 	HN_COMMENTS_THRESHOLD = 10
+	DUPLICATE_CHECK_HOURS = 48
 )
+
+type RedditPost struct {
+	URL       string
+	Title     string
+	CreatedAt time.Time
+}
+
+func normalizeURL(rawURL string) string {
+	if rawURL == "" {
+		return rawURL
+	}
+
+	if strings.Contains(rawURL, "reddit.com") || strings.Contains(rawURL, "redd.it") {
+		return normalizeRedditURL(rawURL)
+	}
+
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+
+	parsedURL.Scheme = strings.ToLower(parsedURL.Scheme)
+	parsedURL.Host = strings.ToLower(parsedURL.Host)
+
+	if parsedURL.Scheme == "" || parsedURL.Scheme == "http" {
+		parsedURL.Scheme = "https"
+	}
+
+	if strings.HasPrefix(parsedURL.Host, "www.") {
+		parsedURL.Host = strings.TrimPrefix(parsedURL.Host, "www.")
+	}
+
+	parsedURL.Path = strings.TrimSuffix(parsedURL.Path, "/")
+	if parsedURL.Path == "" {
+		parsedURL.Path = "/"
+	}
+
+	parsedURL.Fragment = ""
+
+	return parsedURL.String()
+}
 
 func main() {
 	fmt.Println("Starting")
@@ -139,10 +180,12 @@ func processFeed(bot reddit.Bot, feed *gofeed.Feed) error {
 	processedCount := 0
 	errorCount := 0
 
-	existingLinks, err := getExistingPosts(bot)
+	existingPosts, err := getExistingPosts(bot)
 	if err != nil {
 		return fmt.Errorf("error getting existing posts: %w", err)
 	}
+
+	cutoffTime := time.Now().Add(-DUPLICATE_CHECK_HOURS * time.Hour)
 
 	for i, item := range feed.Items {
 		if item == nil {
@@ -160,17 +203,14 @@ func processFeed(bot reddit.Bot, feed *gofeed.Feed) error {
 			continue
 		}
 
-		linkKey := item.Link
-		if strings.Contains(item.Link, "reddit.com") || strings.Contains(item.Link, "redd.it") {
-			linkKey = normalizeRedditURL(item.Link)
-		}
+		normalizedLink := normalizeURL(item.Link)
 
-		if _, exists := existingLinks[linkKey]; exists {
+		if isDuplicate(normalizedLink, item.Title, existingPosts, cutoffTime) {
 			fmt.Printf("Post already exists, skipping: %s\n", item.Link)
 			continue
 		}
 
-		err := postNew(bot, item, existingLinks)
+		err := postNew(bot, item, &existingPosts)
 		if err != nil {
 			errorCount++
 			fmt.Printf("Error posting item %d (%s): %v\n", i, item.Title, err)
@@ -191,20 +231,16 @@ func normalizeRedditURL(rawURL string) string {
 		return rawURL
 	}
 
-	// Remove query parameters and clean up URL
 	cleanURL := rawURL
 	if idx := strings.Index(cleanURL, "?"); idx != -1 {
 		cleanURL = cleanURL[:idx]
 	}
 
-	// Extract Reddit post ID from various URL formats
-	// Pattern matches: reddit.com/r/sub/comments/ID, redd.it/ID, reddit.com/r/sub/s/ID
 	redditIDRegex := regexp.MustCompile(`(?:reddit\.com/r/[^/]+/comments/|redd\.it/)([a-zA-Z0-9]+)`)
 	if matches := redditIDRegex.FindStringSubmatch(cleanURL); len(matches) > 1 {
 		return matches[1]
 	}
 
-	// For shared links (s/XXXXX), we can't resolve without fetching, so use full URL
 	if strings.Contains(cleanURL, "/s/") {
 		return cleanURL
 	}
@@ -212,49 +248,104 @@ func normalizeRedditURL(rawURL string) string {
 	return rawURL
 }
 
-func getExistingPosts(bot reddit.Bot) (map[string]bool, error) {
+func getExistingPosts(bot reddit.Bot) ([]RedditPost, error) {
 	if bot == nil {
 		return nil, errors.New("bot is nil")
 	}
 
 	fmt.Println("Getting existing posts from subreddit")
-	postUrl := fmt.Sprintf("/r/%s/new", REDDIT_SUBREDDIT)
+	var allPosts []RedditPost
+	
+	pageTypes := []string{"new", "hot", "top"}
+	for _, pageType := range pageTypes {
+		postUrl := fmt.Sprintf("/r/%s/%s", REDDIT_SUBREDDIT, pageType)
+		postOpts := map[string]string{
+			"limit": "100",
+		}
+		
+		if pageType == "top" {
+			postOpts["t"] = "week"
+		}
 
-	postOpts := map[string]string{
-		"limit": REDDIT_MAX_POSTS,
-	}
+		posts, err := bot.ListingWithParams(postUrl, postOpts)
+		if err != nil {
+			fmt.Printf("Warning: failed to get %s listings: %v\n", pageType, err)
+			continue
+		}
 
-	posts, err := bot.ListingWithParams(postUrl, postOpts)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get Reddit listings: %w", err)
-	}
+		if posts.Posts == nil {
+			continue
+		}
 
-	if posts.Posts == nil {
-		return nil, errors.New("posts.Posts is nil")
-	}
-
-	existingLinks := make(map[string]bool)
-	for _, post := range posts.Posts {
-		if post.URL != "" && !post.Deleted {
-			if strings.Contains(post.URL, "reddit.com") || strings.Contains(post.URL, "redd.it") {
-				normalizedID := normalizeRedditURL(post.URL)
-				existingLinks[normalizedID] = true
-			} else {
-				existingLinks[post.URL] = true
+		for _, post := range posts.Posts {
+			if post.URL != "" && !post.Deleted {
+				allPosts = append(allPosts, RedditPost{
+					URL:       post.URL,
+					Title:     post.Title,
+					CreatedAt: time.Unix(int64(post.CreatedUTC), 0),
+				})
 			}
 		}
 	}
 
-	if len(existingLinks) == 0 {
+	if len(allPosts) == 0 {
 		fmt.Println("No existing posts found")
-		return nil, errors.New("no existing posts found")
+		return []RedditPost{}, nil
 	}
 
-	fmt.Printf("Found %d existing posts\n", len(existingLinks))
-	return existingLinks, nil
+	fmt.Printf("Found %d existing posts across new/hot/top\n", len(allPosts))
+	return allPosts, nil
 }
 
-func postNew(bot reddit.Bot, item *gofeed.Item, existingLinks map[string]bool) error {
+func isDuplicate(normalizedURL string, title string, existingPosts []RedditPost, cutoffTime time.Time) bool {
+	titleLower := strings.ToLower(title)
+	
+	for _, post := range existingPosts {
+		if post.CreatedAt.Before(cutoffTime) {
+			continue
+		}
+		
+		normalizedExisting := normalizeURL(post.URL)
+		if normalizedExisting == normalizedURL {
+			return true
+		}
+		
+		if isSimilarTitle(titleLower, strings.ToLower(post.Title)) {
+			fmt.Printf("Similar title found: '%s' vs '%s'\n", title, post.Title)
+			return true
+		}
+	}
+	
+	return false
+}
+
+func isSimilarTitle(title1, title2 string) bool {
+	if title1 == title2 {
+		return true
+	}
+	
+	if len(title1) > 20 && len(title2) > 20 {
+		if strings.Contains(title1, title2) || strings.Contains(title2, title1) {
+			return true
+		}
+		
+		commonLength := min(len(title1), len(title2))
+		if commonLength > 30 && title1[:30] == title2[:30] {
+			return true
+		}
+	}
+	
+	return false
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func postNew(bot reddit.Bot, item *gofeed.Item, existingPosts *[]RedditPost) error {
 	if bot == nil {
 		return errors.New("bot is nil")
 	}
@@ -279,13 +370,11 @@ func postNew(bot reddit.Bot, item *gofeed.Item, existingLinks map[string]bool) e
 	}
 	fmt.Println("HN link:", isHn)
 
-	linkKey := item.Link
-	if strings.Contains(item.Link, "reddit.com") || strings.Contains(item.Link, "redd.it") {
-		linkKey = normalizeRedditURL(item.Link)
-	}
+	normalizedLink := normalizeURL(item.Link)
+	cutoffTime := time.Now().Add(-DUPLICATE_CHECK_HOURS * time.Hour)
 
-	if exists := existingLinks[linkKey]; exists {
-		fmt.Println("Post already exists, skipping:", item.Link)
+	if isDuplicate(normalizedLink, item.Title, *existingPosts, cutoffTime) {
+		fmt.Println("Post already exists (double-check), skipping:", item.Link)
 		return nil
 	}
 
@@ -297,6 +386,12 @@ func postNew(bot reddit.Bot, item *gofeed.Item, existingLinks map[string]bool) e
 	if submission.Name == "" {
 		return errors.New("no post id returned")
 	}
+
+	*existingPosts = append(*existingPosts, RedditPost{
+		URL:       item.Link,
+		Title:     item.Title,
+		CreatedAt: time.Now(),
+	})
 
 	if isHn {
 		return nil

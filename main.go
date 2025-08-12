@@ -407,11 +407,13 @@ func postNew(bot reddit.Bot, item *gofeed.Item, existingPosts *[]RedditPost) err
 
 	hnLink := item.GUID
 	if hnLink == "" {
-		return errors.New("no HN link found in GUID")
+		fmt.Printf("Warning: no HN link found in GUID for '%s', skipping comment\n", item.Title)
+		return nil
 	}
 
 	if !strings.Contains(hnLink, HN_BASE_URL) {
-		return fmt.Errorf("GUID not a HN link: %s", hnLink)
+		fmt.Printf("Warning: GUID is not an HN link for '%s': %s, skipping comment\n", item.Title, hnLink)
+		return nil
 	}
 
 	commentTxt := "Discussion on HN: " + hnLink

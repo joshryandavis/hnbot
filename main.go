@@ -257,6 +257,8 @@ func getExistingPosts(bot reddit.Bot) ([]RedditPost, error) {
 
 	fmt.Println("Getting existing posts from subreddit")
 	var allPosts []RedditPost
+	var lastErr error
+	successCount := 0
 
 	pageTypes := []string{"new", "hot", "top"}
 	for _, pageType := range pageTypes {
@@ -272,8 +274,11 @@ func getExistingPosts(bot reddit.Bot) ([]RedditPost, error) {
 		posts, err := bot.ListingWithParams(postUrl, postOpts)
 		if err != nil {
 			fmt.Printf("Warning: failed to get %s listings: %v\n", pageType, err)
+			lastErr = err
 			continue
 		}
+
+		successCount++
 
 		if posts.Posts == nil {
 			continue
@@ -290,12 +295,16 @@ func getExistingPosts(bot reddit.Bot) ([]RedditPost, error) {
 		}
 	}
 
-	if len(allPosts) == 0 {
-		fmt.Println("No existing posts found")
-		return []RedditPost{}, nil
+	if successCount == 0 {
+		return nil, fmt.Errorf("failed to fetch any listings: %w", lastErr)
 	}
 
-	fmt.Printf("Found %d existing posts across new/hot/top\n", len(allPosts))
+	if len(allPosts) == 0 {
+		fmt.Println("No existing posts found")
+	} else {
+		fmt.Printf("Found %d existing posts across new/hot/top\n", len(allPosts))
+	}
+
 	return allPosts, nil
 }
 

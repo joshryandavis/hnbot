@@ -62,20 +62,14 @@ func normalizeURL(rawURL string) string {
 		parsedURL.Host = strings.TrimPrefix(parsedURL.Host, "www.")
 	}
 
-	// Decode and re-encode the path to normalize percent-encoding
-	if decodedPath, err := url.QueryUnescape(parsedURL.Path); err == nil {
-		parsedURL.Path = decodedPath
-	}
-
 	parsedURL.Path = strings.TrimSuffix(parsedURL.Path, "/")
 	if parsedURL.Path == "" {
 		parsedURL.Path = "/"
 	}
 
 	parsedURL.Fragment = ""
-	
-	// Re-encode the URL to ensure consistent encoding
-	parsedURL.RawPath = ""  // Let Go re-encode the path
+	parsedURL.RawQuery = ""
+	parsedURL.RawPath = ""
 
 	return parsedURL.String()
 }
@@ -85,30 +79,25 @@ func main() {
 
 	bot, err := newBot()
 	if err != nil {
-		fmt.Println("Error creating Reddit bot:", err)
-		return
+		panic(err)
 	}
 
 	if bot == nil {
-		fmt.Println("Error: Reddit bot is nil")
-		return
+		panic("Error: Reddit bot is nil")
 	}
 
 	feed, err := getFeed()
 	if err != nil {
-		fmt.Println("Error getting feed:", err)
-		return
+		panic(err)
 	}
 
 	if feed == nil {
-		fmt.Println("Error: feed is nil")
-		return
+		panic("Error: feed is nil")
 	}
 
 	err = processFeed(bot, feed)
 	if err != nil {
-		fmt.Println("Error processing:", err)
-		return
+		panic(err)
 	}
 
 	fmt.Println("Done")
@@ -218,7 +207,7 @@ func processFeed(bot reddit.Bot, feed *gofeed.Feed) error {
 			continue
 		}
 
-		err := postNew(bot, item, &existingPosts)
+		err := postNew(bot, item, &existingPosts, cutoffTime)
 		if err != nil {
 			errorCount++
 			fmt.Printf("Error posting item %d (%s): %v\n", i, item.Title, err)
@@ -228,6 +217,8 @@ func processFeed(bot reddit.Bot, feed *gofeed.Feed) error {
 			continue
 		}
 		processedCount++
+
+		time.Sleep(2 * time.Second)
 	}
 
 	fmt.Printf("Successfully processed %d items\n", processedCount)
@@ -246,14 +237,17 @@ func normalizeRedditURL(rawURL string) string {
 
 	redditIDRegex := regexp.MustCompile(`(?:reddit\.com/r/[^/]+/comments/|redd\.it/)([a-zA-Z0-9]+)`)
 	if matches := redditIDRegex.FindStringSubmatch(cleanURL); len(matches) > 1 {
-		return matches[1]
+		return "reddit.com/comments/" + matches[1]
 	}
 
 	if strings.Contains(cleanURL, "/s/") {
-		return cleanURL
+		shareIDRegex := regexp.MustCompile(`/s/([a-zA-Z0-9]+)`)
+		if matches := shareIDRegex.FindStringSubmatch(cleanURL); len(matches) > 1 {
+			return "reddit.com/s/" + matches[1]
+		}
 	}
 
-	return rawURL
+	return cleanURL
 }
 
 func getExistingPosts(bot reddit.Bot) ([]RedditPost, error) {
@@ -263,14 +257,14 @@ func getExistingPosts(bot reddit.Bot) ([]RedditPost, error) {
 
 	fmt.Println("Getting existing posts from subreddit")
 	var allPosts []RedditPost
-	
+
 	pageTypes := []string{"new", "hot", "top"}
 	for _, pageType := range pageTypes {
 		postUrl := fmt.Sprintf("/r/%s/%s", REDDIT_SUBREDDIT, pageType)
 		postOpts := map[string]string{
 			"limit": "100",
 		}
-		
+
 		if pageType == "top" {
 			postOpts["t"] = "week"
 		}
@@ -307,23 +301,23 @@ func getExistingPosts(bot reddit.Bot) ([]RedditPost, error) {
 
 func isDuplicate(normalizedURL string, title string, existingPosts []RedditPost, cutoffTime time.Time) bool {
 	titleLower := strings.ToLower(title)
-	
+
 	for _, post := range existingPosts {
 		if post.CreatedAt.Before(cutoffTime) {
 			continue
 		}
-		
+
 		normalizedExisting := normalizeURL(post.URL)
 		if normalizedExisting == normalizedURL {
 			return true
 		}
-		
+
 		if isSimilarTitle(titleLower, strings.ToLower(post.Title)) {
 			fmt.Printf("Similar title found: '%s' vs '%s'\n", title, post.Title)
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -331,29 +325,37 @@ func isSimilarTitle(title1, title2 string) bool {
 	if title1 == title2 {
 		return true
 	}
-	
-	if len(title1) > 20 && len(title2) > 20 {
-		if strings.Contains(title1, title2) || strings.Contains(title2, title1) {
-			return true
+
+	if strings.Contains(title1, title2) || strings.Contains(title2, title1) {
+		return true
+	}
+
+	words1 := strings.Fields(title1)
+	words2 := strings.Fields(title2)
+
+	if len(words1) >= 4 && len(words2) >= 4 {
+		commonWords := 0
+		wordSet := make(map[string]bool)
+		for _, w := range words1 {
+			if len(w) > 2 {
+				wordSet[w] = true
+			}
 		}
-		
-		commonLength := min(len(title1), len(title2))
-		if commonLength > 30 && title1[:30] == title2[:30] {
+		for _, w := range words2 {
+			if len(w) > 2 && wordSet[w] {
+				commonWords++
+			}
+		}
+		minWords := min(len(words1), len(words2))
+		if minWords > 0 && float64(commonWords)/float64(minWords) > 0.7 {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func postNew(bot reddit.Bot, item *gofeed.Item, existingPosts *[]RedditPost) error {
+func postNew(bot reddit.Bot, item *gofeed.Item, existingPosts *[]RedditPost, cutoffTime time.Time) error {
 	if bot == nil {
 		return errors.New("bot is nil")
 	}
@@ -372,14 +374,10 @@ func postNew(bot reddit.Bot, item *gofeed.Item, existingPosts *[]RedditPost) err
 
 	fmt.Println("Posting:", item.Title)
 
-	isHn := false
-	if item.Link != "" && strings.Contains(item.Link, HN_BASE_URL) {
-		isHn = true
-	}
+	isHn := strings.Contains(item.Link, HN_BASE_URL)
 	fmt.Println("HN link:", isHn)
 
 	normalizedLink := normalizeURL(item.Link)
-	cutoffTime := time.Now().Add(-DUPLICATE_CHECK_HOURS * time.Hour)
 
 	if isDuplicate(normalizedLink, item.Title, *existingPosts, cutoffTime) {
 		fmt.Println("Post already exists (double-check), skipping:", item.Link)

@@ -4,6 +4,7 @@ import {
   DUPLICATE_CHECK_HOURS,
   MAX_ERROR_COUNT,
   POST_DELAY_MS,
+  REDDIT_SUBREDDIT,
   SCHEDULER_JOB_NAME,
 } from "./constants.js";
 import { normalizeURL } from "./url.js";
@@ -24,6 +25,7 @@ export async function processFeed(
   let errorCount = 0;
 
   const existingPosts = await getExistingPosts(context);
+  const subreddit = await context.reddit.getSubredditByName(REDDIT_SUBREDDIT);
 
   const cutoffTime = new Date(
     Date.now() - DUPLICATE_CHECK_HOURS * 60 * 60 * 1000
@@ -57,7 +59,7 @@ export async function processFeed(
     }
 
     try {
-      await postNew(context, item, existingPosts, cutoffTime);
+      await postNew(context, subreddit, item, existingPosts, cutoffTime);
       processedCount++;
       await sleep(POST_DELAY_MS);
     } catch (err) {

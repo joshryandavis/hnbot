@@ -1,4 +1,4 @@
-import { Devvit } from "@devvit/public-api";
+import { Devvit, Subreddit } from "@devvit/public-api";
 import { RedditPost, FeedItem } from "./types.js";
 import { REDDIT_SUBREDDIT, HN_BASE_URL } from "./constants.js";
 import { normalizeURL } from "./url.js";
@@ -75,6 +75,7 @@ export async function getExistingPosts(
 
 export async function postNew(
   context: Devvit.Context,
+  subreddit: Subreddit,
   item: FeedItem,
   existingPosts: RedditPost[],
   cutoffTime: Date
@@ -99,7 +100,6 @@ export async function postNew(
     return;
   }
 
-  const subreddit = await context.reddit.getSubredditByName(REDDIT_SUBREDDIT);
   const submission = await subreddit.submitPost({
     title: item.title,
     url: item.link,

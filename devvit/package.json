@@ -1,0 +1,14 @@
+{
+  "name": "hnbot-tstest-1",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "license": "BSD-3-Clause",
+  "main": "src/main.ts",
+  "devDependencies": {
+    "@devvit/public-api": "0.12.6"
+  },
+  "engines": {
+    "node": ">=22.2.0"
+  }
+}

@@ -5,6 +5,7 @@ import {
   REDDIT_SUBREDDIT,
 } from "./constants.js";
 import { registerSchedulerJob } from "./scheduler.js";
+import { getFeed } from "./feed.js";
 
 Devvit.configure({
   redditAPI: true,
@@ -39,6 +40,34 @@ Devvit.addMenuItem({
     });
 
     context.ui.showToast("HN Bot job triggered");
+  },
+});
+
+// Dry-run test: only fetches RSS feed, doesn't post anything
+Devvit.addMenuItem({
+  label: "Test HN Feed Fetch (Dry Run)",
+  location: "subreddit",
+  onPress: async (_event, context) => {
+    console.log("=== DRY RUN TEST START ===");
+    console.log("Testing fetch to hnrss.org...");
+
+    try {
+      const feed = await getFeed();
+      console.log(`SUCCESS: Fetched ${feed.items.length} items from hnrss.org`);
+      console.log("First 3 items:");
+      for (let i = 0; i < Math.min(3, feed.items.length); i++) {
+        const item = feed.items[i];
+        console.log(`  ${i + 1}. ${item.title}`);
+        console.log(`     Link: ${item.link}`);
+        console.log(`     HN: ${item.guid}`);
+      }
+      context.ui.showToast(`Success! Fetched ${feed.items.length} items from hnrss.org`);
+    } catch (err) {
+      console.error("FAILED to fetch from hnrss.org:", err);
+      context.ui.showToast(`Failed: ${err}`);
+    }
+
+    console.log("=== DRY RUN TEST END ===");
   },
 });
 

@@ -27,3 +27,7 @@ hnbot
 
 # Claude Code
 .claude
+
+# Node
+devvit/node_modules
+devvit/package-lock.json

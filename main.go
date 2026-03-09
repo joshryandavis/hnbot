@@ -17,6 +17,7 @@ import (
 
 const (
 	REDDIT_TIMEOUT        = 30
+	RSS_TIMEOUT           = 120
 	REDDIT_SUBREDDIT      = "hackernews"
 	REDDIT_AGENT          = "hackernews:hnmod:0.1.0"
 	REDDIT_USERNAME       = "hnmod"
@@ -132,7 +133,7 @@ func getFeed() (*gofeed.Feed, error) {
 		return nil, errors.New("failed to create feed parser")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*REDDIT_TIMEOUT)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*RSS_TIMEOUT)
 	defer cancel()
 
 	feed, err := fp.ParseURLWithContext(rssURL.String(), ctx)

@@ -87,13 +87,19 @@ func main() {
 		panic("Error: Reddit bot is nil")
 	}
 
-	feed, err := getFeed()
-	if err != nil {
-		panic(err)
-	}
-
-	if feed == nil {
-		panic("Error: feed is nil")
+	var feed *gofeed.Feed
+	maxRetries := 5
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		feed, err = getFeed()
+		if err == nil && feed != nil {
+			break
+		}
+		if attempt == maxRetries-1 {
+			panic(fmt.Sprintf("failed to get feed after %d attempts: %v", maxRetries, err))
+		}
+		backoff := time.Duration(1<<uint(attempt)) * time.Second // 1s, 2s, 4s, 8s, 16s
+		fmt.Printf("Feed fetch failed (attempt %d/%d): %v. Retrying in %v...\n", attempt+1, maxRetries, err, backoff)
+		time.Sleep(backoff)
 	}
 
 	err = processFeed(bot, feed)

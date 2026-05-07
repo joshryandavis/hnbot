@@ -1,0 +1,13 @@
+export const REDDIT_SUBREDDIT = "hackernews";
+export const HN_BASE_URL = "news.ycombinator.com";
+export const RSS_PROTOCOL = "https";
+export const RSS_BASE_URL = "hnrss.org";
+export const RSS_FEED = "frontpage";
+export const RSS_COUNT = 50;
+export const HN_POINTS_THRESHOLD = 100;
+export const HN_COMMENTS_THRESHOLD = 10;
+export const DUPLICATE_CHECK_HOURS = 48;
+export const SCHEDULER_JOB_NAME = "hnBotFeedProcessor";
+export const SCHEDULER_CRON = "*/15 * * * *";
+export const MAX_ERROR_COUNT = 3;
+export const POST_DELAY_MS = 2000;

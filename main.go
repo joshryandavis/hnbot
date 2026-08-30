@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -11,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mmcdole/gofeed"
+	"github.com/mmcdole/gofeed/rss"
 	"github.com/turnage/graw/reddit"
 )
 
@@ -24,11 +25,8 @@ const (
 	REDDIT_ID             = "v7eIyAVMwtcKG00ahocIXg"
 	HN_BASE_URL           = "news.ycombinator.com"
 	RSS_PROTOCOL          = "https"
-	RSS_BASE_URL          = "hnrss.org"
-	RSS_FEED              = "frontpage"
-	RSS_COUNT             = 50
-	HN_POINTS_THRESHOLD   = 100
-	HN_COMMENTS_THRESHOLD = 10
+	RSS_BASE_URL          = "news.ycombinator.com"
+	RSS_FEED              = "rss"
 	DUPLICATE_CHECK_HOURS = 48
 )
 
@@ -36,6 +34,16 @@ type RedditPost struct {
 	URL       string
 	Title     string
 	CreatedAt time.Time
+}
+
+// FeedItem carries the parsed feed item data plus the HN discussion URL,
+// which the official HN RSS feed exposes via the <comments> element
+// (gofeed's generic Item does not expose it).
+type FeedItem struct {
+	Title       string
+	Link        string
+	Published   *time.Time
+	CommentsURL string
 }
 
 func normalizeURL(rawURL string) string {
@@ -87,7 +95,7 @@ func main() {
 		panic("Error: Reddit bot is nil")
 	}
 
-	var feed *gofeed.Feed
+	var feed *rss.Feed
 	maxRetries := 5
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		feed, err = getFeed()
@@ -117,34 +125,47 @@ func buildFeedUrl() *url.URL {
 		Path:   RSS_FEED,
 	}
 
-	query := rssURL.Query()
-	query.Set("count", fmt.Sprintf("%d", RSS_COUNT))
-	query.Set("points", fmt.Sprintf("%d", HN_POINTS_THRESHOLD))
-	query.Set("comments", fmt.Sprintf("%d", HN_COMMENTS_THRESHOLD))
-
-	rssURL.RawQuery = query.Encode()
-
 	return rssURL
 }
 
-func getFeed() (*gofeed.Feed, error) {
+func getFeed() (*rss.Feed, error) {
 	fmt.Println("Getting feed")
 
 	rssURL := buildFeedUrl()
 
 	fmt.Println("RSS URL:", rssURL.String())
 
-	fp := gofeed.NewParser()
-	if fp == nil {
-		return nil, errors.New("failed to create feed parser")
+	client := &http.Client{
+		Timeout: time.Second * RSS_TIMEOUT,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*RSS_TIMEOUT)
 	defer cancel()
 
-	feed, err := fp.ParseURLWithContext(rssURL.String(), ctx)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rssURL.String(), nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse feed URL: %w", err)
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch feed URL: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code fetching feed: %d %s", resp.StatusCode, resp.Status)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read feed body: %w", err)
+	}
+
+	rssParser := &rss.Parser{}
+	feed, err := rssParser.Parse(strings.NewReader(string(body)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse feed: %w", err)
 	}
 
 	if feed == nil {
@@ -163,7 +184,7 @@ func getFeed() (*gofeed.Feed, error) {
 		if item == nil {
 			return nil, fmt.Errorf("feed item at index %d is nil", i)
 		}
-		if item.PublishedParsed == nil {
+		if item.PubDateParsed == nil {
 			return nil, fmt.Errorf("feed item at index %d has nil publish date", i)
 		}
 	}
@@ -171,7 +192,7 @@ func getFeed() (*gofeed.Feed, error) {
 	return feed, nil
 }
 
-func processFeed(bot reddit.Bot, feed *gofeed.Feed) error {
+func processFeed(bot reddit.Bot, feed *rss.Feed) error {
 	if bot == nil {
 		return errors.New("bot is nil")
 	}
@@ -197,7 +218,7 @@ func processFeed(bot reddit.Bot, feed *gofeed.Feed) error {
 			continue
 		}
 
-		if item.PublishedParsed == nil {
+		if item.PubDateParsed == nil {
 			fmt.Printf("Warning: skipping item with nil publish date: %s\n", item.Title)
 			continue
 		}
@@ -207,6 +228,13 @@ func processFeed(bot reddit.Bot, feed *gofeed.Feed) error {
 			continue
 		}
 
+		feedItem := &FeedItem{
+			Title:       item.Title,
+			Link:        item.Link,
+			Published:   item.PubDateParsed,
+			CommentsURL: item.Comments,
+		}
+
 		normalizedLink := normalizeURL(item.Link)
 
 		if isDuplicate(normalizedLink, item.Title, existingPosts, cutoffTime) {
@@ -214,7 +242,7 @@ func processFeed(bot reddit.Bot, feed *gofeed.Feed) error {
 			continue
 		}
 
-		err := postNew(bot, item, &existingPosts, cutoffTime)
+		err := postNew(bot, feedItem, &existingPosts, cutoffTime)
 		if err != nil {
 			errorCount++
 			fmt.Printf("Error posting item %d (%s): %v\n", i, item.Title, err)
@@ -371,7 +399,7 @@ func isSimilarTitle(title1, title2 string) bool {
 	return false
 }
 
-func postNew(bot reddit.Bot, item *gofeed.Item, existingPosts *[]RedditPost, cutoffTime time.Time) error {
+func postNew(bot reddit.Bot, item *FeedItem, existingPosts *[]RedditPost, cutoffTime time.Time) error {
 	if bot == nil {
 		return errors.New("bot is nil")
 	}
@@ -419,14 +447,14 @@ func postNew(bot reddit.Bot, item *gofeed.Item, existingPosts *[]RedditPost, cut
 		return nil
 	}
 
-	hnLink := item.GUID
+	hnLink := item.CommentsURL
 	if hnLink == "" {
-		fmt.Printf("Warning: no HN link found in GUID for '%s', skipping comment\n", item.Title)
+		fmt.Printf("Warning: no HN link found in comments for '%s', skipping comment\n", item.Title)
 		return nil
 	}
 
 	if !strings.Contains(hnLink, HN_BASE_URL) {
-		fmt.Printf("Warning: GUID is not an HN link for '%s': %s, skipping comment\n", item.Title, hnLink)
+		fmt.Printf("Warning: comments is not an HN link for '%s': %s, skipping comment\n", item.Title, hnLink)
 		return nil
 	}
 

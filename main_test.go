@@ -1,8 +1,11 @@
 package main
 
 import (
+	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -778,6 +781,53 @@ func TestGetFeedWithMockServer(t *testing.T) {
 	}
 	if item.PubDateParsed == nil {
 		t.Error("PubDateParsed is nil")
+	}
+}
+
+// TestFeedClientDoesNotOfferHTTP2 guards the workaround for HN's edge answering
+// Go's default HTTP/2 client on /rss with "419 Sorry" (see newFeedClient).
+// It captures the ALPN protocols the feed client offers, so it fails as soon as
+// the client starts advertising h2 again. No certificate trust is needed because
+// the handshake is aborted once the ClientHello has been recorded.
+func TestFeedClientDoesNotOfferHTTP2(t *testing.T) {
+	captured := make(chan []string, 1)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+
+	serverCfg := &tls.Config{
+		GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+			captured <- append([]string(nil), hello.SupportedProtos...)
+			return nil, errors.New("handshake aborted after capturing ALPN")
+		},
+	}
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_ = tls.Server(conn, serverCfg).Handshake()
+	}()
+
+	client := newFeedClient()
+	client.Timeout = 5 * time.Second
+	// The handshake is meant to fail; only the ALPN offer matters.
+	_, fetchErr := client.Get("https://" + ln.Addr().String())
+
+	select {
+	case got := <-captured:
+		for _, proto := range got {
+			if proto == "h2" {
+				t.Errorf("feed client offered %v, want no h2: HN answers 419 to Go's HTTP/2 client on /rss", got)
+				return
+			}
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("client never reached the TLS handshake (fetch error: %v)", fetchErr)
 	}
 }
 

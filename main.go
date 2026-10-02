@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -128,6 +129,24 @@ func buildFeedUrl() *url.URL {
 	return rssURL
 }
 
+// newFeedClient returns the HTTP client used to fetch the HN RSS feed.
+//
+// HN's edge answers Go's default HTTP/2 client on /rss with "419 Sorry" and an
+// empty reason phrase, which is a client-fingerprint block rather than a
+// User-Agent or IP block: the same request over HTTP/1.1 succeeds, as do curl,
+// Python and Node (whether or not they use HTTP/2). A non-nil empty TLSNextProto
+// map is the supported way to stop net/http negotiating HTTP/2; setting
+// ForceAttemptHTTP2 to false does not work on its own, because a transport with
+// a nil TLSClientConfig attempts HTTP/2 regardless.
+func newFeedClient() *http.Client {
+	return &http.Client{
+		Timeout: time.Second * RSS_TIMEOUT,
+		Transport: &http.Transport{
+			TLSNextProto: make(map[string]func(string, *tls.Conn) http.RoundTripper),
+		},
+	}
+}
+
 func getFeed() (*rss.Feed, error) {
 	fmt.Println("Getting feed")
 
@@ -135,9 +154,7 @@ func getFeed() (*rss.Feed, error) {
 
 	fmt.Println("RSS URL:", rssURL.String())
 
-	client := &http.Client{
-		Timeout: time.Second * RSS_TIMEOUT,
-	}
+	client := newFeedClient()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*RSS_TIMEOUT)
 	defer cancel()

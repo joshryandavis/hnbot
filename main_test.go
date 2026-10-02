@@ -304,7 +304,7 @@ func TestBuildFeedUrl(t *testing.T) {
 		t.Fatal("buildFeedUrl() returned nil")
 	}
 
-	expected := "https://news.ycombinator.com/rss"
+	expected := "https://hnrss.org/frontpage?count=30"
 	actual := url.String()
 	if actual != expected {
 		t.Errorf("buildFeedUrl() = %q, want %q", actual, expected)
@@ -313,11 +313,34 @@ func TestBuildFeedUrl(t *testing.T) {
 	if url.Scheme != "https" {
 		t.Errorf("Scheme = %q, want %q", url.Scheme, "https")
 	}
-	if url.Host != "news.ycombinator.com" {
-		t.Errorf("Host = %q, want %q", url.Host, "news.ycombinator.com")
+	if url.Host != "hnrss.org" {
+		t.Errorf("Host = %q, want %q", url.Host, "hnrss.org")
 	}
-	if url.Path != "rss" {
-		t.Errorf("Path = %q, want %q", url.Path, "rss")
+	if url.Path != "frontpage" {
+		t.Errorf("Path = %q, want %q", url.Path, "frontpage")
+	}
+	if url.RawQuery != "count=30" {
+		t.Errorf("RawQuery = %q, want %q", url.RawQuery, "count=30")
+	}
+}
+
+// TestFeedURLs guards the candidate list: the mirror HN's edge will serve a
+// cloud runner must stay first, and the official feed must stay as a fallback
+// for environments HN still answers.
+func TestFeedURLs(t *testing.T) {
+	urls := feedURLs()
+	if len(urls) != 2 {
+		t.Fatalf("feedURLs() returned %d candidates, want 2", len(urls))
+	}
+
+	expected := []string{
+		"https://hnrss.org/frontpage?count=30",
+		"https://news.ycombinator.com/rss",
+	}
+	for i, want := range expected {
+		if got := urls[i].String(); got != want {
+			t.Errorf("feedURLs()[%d] = %q, want %q", i, got, want)
+		}
 	}
 }
 

@@ -26,8 +26,11 @@ const (
 	REDDIT_ID             = "v7eIyAVMwtcKG00ahocIXg"
 	HN_BASE_URL           = "news.ycombinator.com"
 	RSS_PROTOCOL          = "https"
-	RSS_BASE_URL          = "news.ycombinator.com"
-	RSS_FEED              = "rss"
+	RSS_BASE_URL          = "hnrss.org"
+	RSS_FEED              = "frontpage"
+	RSS_QUERY             = "count=30"
+	FALLBACK_RSS_BASE_URL = "news.ycombinator.com"
+	FALLBACK_RSS_FEED     = "rss"
 	DUPLICATE_CHECK_HOURS = 48
 )
 
@@ -119,25 +122,44 @@ func main() {
 	fmt.Println("Done")
 }
 
+// buildFeedUrl returns the primary feed URL.
 func buildFeedUrl() *url.URL {
-	rssURL := &url.URL{
-		Scheme: RSS_PROTOCOL,
-		Host:   RSS_BASE_URL,
-		Path:   RSS_FEED,
-	}
-
-	return rssURL
+	return feedURL(RSS_BASE_URL, RSS_FEED, RSS_QUERY)
 }
 
-// newFeedClient returns the HTTP client used to fetch the HN RSS feed.
+func feedURL(host, path, query string) *url.URL {
+	return &url.URL{
+		Scheme:   RSS_PROTOCOL,
+		Host:     host,
+		Path:     path,
+		RawQuery: query,
+	}
+}
+
+// feedURLs lists the candidate feeds in preference order.
+//
+// HN's own /rss is only a fallback because it is unreachable from GitHub-hosted
+// runners: HN's edge answers "419 Sorry" to Go clients from cloud IP ranges
+// whatever the HTTP version or User-Agent, while the same runner's curl over
+// HTTP/1.1 succeeds and HN's own HTML front page loads fine. That points at a
+// client-fingerprint rule layered on IP reputation, so no header or protocol
+// tweak passes from a cloud runner. hnrss.org mirrors the same front page as
+// RSS 2.0, including the <comments> element the bot reads.
+func feedURLs() []*url.URL {
+	return []*url.URL{
+		buildFeedUrl(),
+		feedURL(FALLBACK_RSS_BASE_URL, FALLBACK_RSS_FEED, ""),
+	}
+}
+
+// newFeedClient returns the HTTP client used to fetch the feed.
 //
 // HN's edge answers Go's default HTTP/2 client on /rss with "419 Sorry" and an
-// empty reason phrase, which is a client-fingerprint block rather than a
-// User-Agent or IP block: the same request over HTTP/1.1 succeeds, as do curl,
-// Python and Node (whether or not they use HTTP/2). A non-nil empty TLSNextProto
-// map is the supported way to stop net/http negotiating HTTP/2; setting
-// ForceAttemptHTTP2 to false does not work on its own, because a transport with
-// a nil TLSClientConfig attempts HTTP/2 regardless.
+// empty reason phrase. Forcing HTTP/1.1 alone does not reach HN from a cloud
+// runner, but it is what makes the HN fallback work from residential IPs, so it
+// stays. A non-nil empty TLSNextProto map is the supported way to stop net/http
+// negotiating HTTP/2; setting ForceAttemptHTTP2 to false does not work on its
+// own, because a transport with a nil TLSClientConfig attempts HTTP/2 anyway.
 func newFeedClient() *http.Client {
 	return &http.Client{
 		Timeout: time.Second * RSS_TIMEOUT,
@@ -147,15 +169,30 @@ func newFeedClient() *http.Client {
 	}
 }
 
+// getFeed returns the first candidate feed that fetches and validates. Each
+// candidate is tried once; main's retry loop covers transient failures.
 func getFeed() (*rss.Feed, error) {
 	fmt.Println("Getting feed")
 
-	rssURL := buildFeedUrl()
-
-	fmt.Println("RSS URL:", rssURL.String())
-
 	client := newFeedClient()
 
+	var errs []error
+	for _, rssURL := range feedURLs() {
+		fmt.Println("RSS URL:", rssURL.String())
+
+		feed, err := fetchFeed(client, rssURL)
+		if err == nil {
+			return feed, nil
+		}
+
+		fmt.Printf("Feed fetch failed for %s: %v\n", rssURL, err)
+		errs = append(errs, fmt.Errorf("%s: %w", rssURL, err))
+	}
+
+	return nil, errors.Join(errs...)
+}
+
+func fetchFeed(client *http.Client, rssURL *url.URL) (*rss.Feed, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*RSS_TIMEOUT)
 	defer cancel()
 
